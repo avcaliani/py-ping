@@ -1,69 +1,127 @@
-from time import sleep
-import numpy as np
-import matplotlib.pyplot as plt
+import os
+import re
 from datetime import datetime, timedelta
+from functools import reduce
 from random import choice
+from subprocess import Popen, PIPE
+
+import matplotlib.pyplot as plt
 import pandas as pd
 
-import subprocess
-import re
-import os
-
-COMMAND = 'ping -t 1 8.8.8.8'
+DURATION = 60 * 60 * 24  # 24h in Secs
+COMMAND = 'ping -t 1 <HOST>'
+HOSTS = ['8.8.8.8', '8.8.4.4']  # Google DNS
 RESULT_PATTERN = r'.*time=(\d+\.?\d*)\sms'
-DURATION = 60 * 60 * 4  # Seconds
-SLEEP_TIME = 1 # Seconds
+SLEEP_TIME = 1  # Seconds
 MAX_ACCEPTABLE_LATENCY = 70
+SHOW_CHART = True
 
-ORANGE = '1;38;5;202'
-RED = '1;31'
-GREEN = '1;32'
+UI_CONFIGS = {
+    'ok': {'chart_icon': '.', 'chart_color': 'green', 'log_color': '1;32'},
+    'warn': {'chart_icon': '^', 'chart_color': 'orange', 'log_color': '1;38;5;202'},
+    'error': {'chart_icon': 'X', 'chart_color': 'red', 'log_color': '1;31'},
+}
 
-def color(color_pattern, value):
+
+def ui_color(color_pattern, value):
     return f'\033[{color_pattern}m{value}\033[00m'
 
-def ping():
-    process = subprocess.Popen(COMMAND.split(), stdout=subprocess.PIPE, universal_newlines=True)
-    stdout = process.stdout.readlines()
+
+def ui_config(latency):
+    if latency <= 0:
+        return UI_CONFIGS['error']
+    if latency > MAX_ACCEPTABLE_LATENCY:
+        return UI_CONFIGS['warn']
+    return UI_CONFIGS['ok']
+
+
+def ping(host, command, search_pattern):
+    ping_command = command.replace('<HOST>', host)
+    process = Popen(
+        ping_command.split(),
+        stdout=PIPE,
+        universal_newlines=True
+    )
+    latency, stdout = -1, process.stdout.readlines()
     for line in stdout:
-        res = re.search(RESULT_PATTERN, line.strip(), re.IGNORECASE)
+        res = re.search(search_pattern, line.strip(), re.IGNORECASE)
         if res:
             latency = float(res.group(1))
-            return latency
-    print(f'NOT FOUND: {line.strip()}')
-    return -1
+            break
+    return {
+        'date': datetime.now(),
+        'host': host,
+        'latency': latency,
+        'error': 1 if latency < 0 else 0,
+        'command': ping_command,
+        'output': reduce(lambda x, y: f'{x}{y}', stdout)
+    }
 
 
-
-def add_result(date, latency):
-    chart_color, shape, log_color = 'green', '.', GREEN
-    if latency <= 0:
-        chart_color, shape, log_color = 'red', 'X', RED
-    if latency > MAX_ACCEPTABLE_LATENCY:
-        chart_color, shape, log_color = 'orange', '^', ORANGE
-    print(f'Time: {date.strftime("%Y-%m-%d %H:%M:%S")} | Latency: {color(log_color, latency)} ms')
-    plt.scatter(x=date, y=latency, c=chart_color, marker=shape)
+def plot_result(date, latency, ui):
+    plt.scatter(x=date, y=latency, c=ui['chart_color'], marker=ui['chart_icon'])
     plt.pause(SLEEP_TIME)
 
 
+def report(df):
+    print('---------------< REPORT >---------------')
+    no_errors = df[df['error'] == 0]
+
+    result = no_errors['latency'].min()
+    result = ui_color(ui_config(result)['log_color'], result)
+    print(f'Latency | Min: {result} ms')
+
+    result = no_errors['latency'].max()
+    result = ui_color(ui_config(result)['log_color'], result)
+    print(f'Latency | Max: {result} ms')
+
+    result = no_errors['latency'].mean()
+    result = ui_color(ui_config(result)['log_color'], result)
+    print(f'Latency | AVG: {result} ms')
+
+    print(f'Ping    | Acceptable: {(no_errors[no_errors["latency"] <= MAX_ACCEPTABLE_LATENCY]).shape[0]}')
+    print(f'Ping    | Errors: {(df[df["error"] == 1]).shape[0]}')
+    print(f'Ping    | Warnings: {(no_errors[no_errors["latency"] > MAX_ACCEPTABLE_LATENCY]).shape[0]}')
+    print(f'Ping    | Total: {df.shape[0]}')
+
+    print(f'Test Duration: {df["date"].max() - df["date"].min()}')
+    print('----------------------------------------')
+
+
 def main():
-    started_at = datetime.now()
-    ending = datetime.now() + timedelta(seconds=DURATION)
-    records = []
-    while datetime.now() < ending:
-        rec = {'date': datetime.now(), 'latency': ping()}
-        records.append(rec)
-        add_result(**rec)
-    
-    df = pd.DataFrame(records)
-    print(f'Min. Latency: {df["latency"].min()}')
-    print(f'Max. Latency: {df["latency"].max()}')
-    print(f'AVG. Latency: {df["latency"].mean()}')
-    print(f'Duration: {df["date"].max() - df["date"].min()}')
-    print('** END **')
-    os.makedirs('data', exist_ok=True)
-    df.to_csv(f'data/{started_at.strftime("%Y%m%d.%H%M%S")}.csv', index=False)
-    plt.show()
+    records, started_at = [], datetime.now()
+    try:
+        if SHOW_CHART:
+            plt.figure(num='🐍 Py Ping')
+
+        ending = datetime.now() + timedelta(seconds=DURATION)
+        while datetime.now() < ending:
+            result = ping(choice(HOSTS), COMMAND, RESULT_PATTERN)
+            records.append(result)
+            ui = ui_config(result['latency'])
+
+            pretty_date = result['date'].strftime("%Y-%m-%d %H:%M:%S")
+            pretty_latency = ui_color(
+                ui['log_color'],
+                f'{result["latency"]} ms' if result['latency'] >= 0 else 'ERROR'
+            )
+            print(f'Time: {pretty_date} | Host: {result["host"]} | Latency: {pretty_latency}')
+            if SHOW_CHART:
+                plot_result(result['date'], result['latency'], ui=ui)
+
+    except Exception as ex:
+        print(f'Ops! Something went wrong...\nError: {ex}')
+    except KeyboardInterrupt:
+        print(f'\nStopping execution...')
+    finally:
+        df = pd.DataFrame(records)
+        report(df)
+        path = f'data/{started_at.strftime("%Y%m%d.%H%M%S")}.csv'
+        os.makedirs('data', exist_ok=True)
+        df.to_csv(path, index=False)
+        if SHOW_CHART:
+            plt.show()
+
 
 if __name__ == '__main__':
     main()
