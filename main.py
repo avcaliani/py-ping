@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import re
 from datetime import datetime, timedelta
@@ -8,13 +9,7 @@ from subprocess import Popen, PIPE
 import matplotlib.pyplot as plt
 import pandas as pd
 
-DURATION = 60 * 60 * 24  # 24h in Secs
-COMMAND = 'ping -t 1 <HOST>'
-HOSTS = ['8.8.8.8', '8.8.4.4']  # Google DNS
-RESULT_PATTERN = r'.*time=(\d+\.?\d*)\sms'
-SLEEP_TIME = 1  # Seconds
-MAX_ACCEPTABLE_LATENCY = 70
-SHOW_CHART = True
+from src import arguments
 
 UI_CONFIGS = {
     'ok': {'chart_icon': '.', 'chart_color': 'green', 'log_color': '1;32'},
@@ -30,7 +25,7 @@ def ui_color(color_pattern, value):
 def ui_config(latency):
     if latency <= 0:
         return UI_CONFIGS['error']
-    if latency > MAX_ACCEPTABLE_LATENCY:
+    if latency > args.max_acceptable_latency:
         return UI_CONFIGS['warn']
     return UI_CONFIGS['ok']
 
@@ -60,7 +55,7 @@ def ping(host, command, search_pattern):
 
 def plot_result(date, latency, ui):
     plt.scatter(x=date, y=latency, c=ui['chart_color'], marker=ui['chart_icon'])
-    plt.pause(SLEEP_TIME)
+    plt.pause(args.sleep_time)
 
 
 def report(df):
@@ -79,9 +74,9 @@ def report(df):
     result = ui_color(ui_config(result)['log_color'], result)
     print(f'Latency | AVG: {result} ms')
 
-    print(f'Ping    | Acceptable: {(no_errors[no_errors["latency"] <= MAX_ACCEPTABLE_LATENCY]).shape[0]}')
+    print(f'Ping    | Acceptable: {(no_errors[no_errors["latency"] <= args.max_acceptable_latency]).shape[0]}')
     print(f'Ping    | Errors: {(df[df["error"] == 1]).shape[0]}')
-    print(f'Ping    | Warnings: {(no_errors[no_errors["latency"] > MAX_ACCEPTABLE_LATENCY]).shape[0]}')
+    print(f'Ping    | Warnings: {(no_errors[no_errors["latency"] > args.max_acceptable_latency]).shape[0]}')
     print(f'Ping    | Total: {df.shape[0]}')
 
     print(f'Test Duration: {df["date"].max() - df["date"].min()}')
@@ -91,12 +86,12 @@ def report(df):
 def main():
     records, started_at = [], datetime.now()
     try:
-        if SHOW_CHART:
+        if not args.no_chart:
             plt.figure(num='🐍 Py Ping')
 
-        ending = datetime.now() + timedelta(seconds=DURATION)
+        ending = datetime.now() + timedelta(seconds=args.duration)
         while datetime.now() < ending:
-            result = ping(choice(HOSTS), COMMAND, RESULT_PATTERN)
+            result = ping(choice(args.hosts), args.command, args.result_pattern)
             records.append(result)
             ui = ui_config(result['latency'])
 
@@ -106,7 +101,7 @@ def main():
                 f'{result["latency"]} ms' if result['latency'] >= 0 else 'ERROR'
             )
             print(f'Time: {pretty_date} | Host: {result["host"]} | Latency: {pretty_latency}')
-            if SHOW_CHART:
+            if not args.no_chart:
                 plot_result(result['date'], result['latency'], ui=ui)
 
     except Exception as ex:
@@ -119,9 +114,11 @@ def main():
         path = f'data/{started_at.strftime("%Y%m%d.%H%M%S")}.csv'
         os.makedirs('data', exist_ok=True)
         df.to_csv(path, index=False)
-        if SHOW_CHART:
+        if not args.no_chart:
             plt.show()
 
 
 if __name__ == '__main__':
+    args = arguments.get()
+    print(f'Args: {args}')
     main()

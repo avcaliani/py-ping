@@ -16,7 +16,20 @@ poetry env info
 source $path_to_python_venv
 
 # Let's go \o/
-python main.py
+./main.py
+
+# Help 
+./main.py -h 
+
+# All Options
+./main.py \
+  --duration 60 \
+  --cmd 'ping -t 1 <HOST>' \
+  --pattern '.*time=(\d+\.?\d*)\sms' \
+  --hosts '8.8.8.8' '8.8.4.4' \
+  --sleep 3 \
+  --max-ping 50 \
+  --no-chart
 ```
 
 ## Screenshots
