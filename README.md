@@ -1,5 +1,5 @@
 
-# Py Ping
+# 🕹 Py Ping
 
 ![#](https://img.shields.io/badge/licence-MIT-lightseagreen.svg)
 ![#](https://img.shields.io/badge/python-3.9.x-yellow.svg)
